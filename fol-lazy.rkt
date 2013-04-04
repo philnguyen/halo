@@ -1,6 +1,6 @@
 #lang racket
 (require redex "lang.rkt")
-(provide P D U E C Theory-T axioms)
+(provide P D U E C Theory-T axioms diff gen)
 
 ;; translates program into FOL formula
 (define-metafunction halo
@@ -21,10 +21,7 @@
   [(U s [case e (K y ... -> e′) ...])
    (∧* [(t = bad) . ⇒ . (s = bad)]
        [∀ (y ...) ([t = (K y ...)] . ⇒ . [s = (E e′)])] ...
-       [(∧*
-         [t . ≠ . bad]
-         [diff t K] ...)
-        . ⇒ . (s = unr)])
+       [(∧* [t . ≠ . bad] [diff t K] ...) . ⇒ . (s = unr)])
    (where t [E e])])
 
 (define-metafunction halo

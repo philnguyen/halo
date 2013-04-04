@@ -36,6 +36,13 @@
 
 ;;;;; CONVENIENT MACROS
 
+;; multiple-argument function contract
+(define-metafunction halo
+  ->* : (x : c) (x : c) ... c -> ([x : c] -> c)
+  [([x : c_x] . ->* . c_y) ([x : c_x] -> c_y)]
+  [([x : c_x] [y : c_y] ... . ->* . c_z)
+   ([x : c_x] -> ([y : c_y] ... . ->* . c_z))])
+
 ;; big conjunction
 (define-metafunction halo
   ∧* : φ φ ... -> φ
@@ -66,7 +73,7 @@
 ;; desugar equivalence
 (define-metafunction halo
   ⇔ : φ φ -> φ
-  [(φ . ⇔ . ψ) ([φ . ⇒ . ψ] ∧ [ψ . ⇒ . ψ])])
+  [(φ . ⇔ . ψ) ([φ . ⇒ . ψ] ∧ [ψ . ⇒ . φ])])
 
 ;; desugar difference
 (define-metafunction halo
@@ -136,10 +143,11 @@
   z3-φ : φ -> any
   [(z3-φ (cf t)) (cf [z3-t t])]
   [(z3-φ (t_1 = t_2)) (= [z3-t t_1] [z3-t t_2])]
+  [(z3-φ (((¬ φ) ∨ ψ) ∧ ((¬ ψ) ∨ φ))) (= [z3-φ φ] [z3-φ ψ])]
   [(z3-φ (φ ∧ ψ)) (and [z3-φ φ] [z3-φ ψ])]
-  [(z3-φ ([¬ φ] ∨ ψ)) (implies [z3-φ φ] [z3-φ ψ])]
+  [(z3-φ ([¬ φ] ∨ ψ)) (=> [z3-φ φ] [z3-φ ψ])]
   [(z3-φ (φ ∨ ψ)) (or [z3-φ φ] [z3-φ ψ])]
-  [(z3-φ (φ ⇒ ψ)) (implies [z3-φ φ] [z3-φ ψ])]
+  [(z3-φ (¬ (s = t))) (distinct [z3-t s] [z3-t t])]
   [(z3-φ (¬ φ)) (not [z3-φ φ])]
   [(z3-φ (∀ () φ)) (z3-φ φ)]
   [(z3-φ (∀ (x ...) φ)) (forall ([x T] ...) [z3-φ φ])]
@@ -172,9 +180,17 @@
     #;[(F even?) n = (case n
                        [Zero -> (True)]
                        [Succ m -> ([F not] ([F even?] m))])]
-    [(F nil?) x = (case x
-                    [Nil -> (True)]
-                    [Cons z zs -> (False)])]
-    [(F map) f xs = (case xs
-                      [Nil -> (Nil)]
-                      [Cons z zs -> (Cons [f z] [@ (F map) f zs])])])))
+    [(F cons?) x = (case x
+                     [Nil -> (False)]
+                     [Cons z zs -> (True)])]
+    #;[(F nil?) x = (case x
+                      [Nil -> (True)]
+                      [Cons z zs -> (False)])]
+    [(F head) xs = (case xs
+                     [Nil -> BAD]
+                     [Cons z zs -> z])]
+    #;[(F map) f xs = (case xs
+                        [Nil -> (Nil)]
+                        [Cons z zs -> (Cons [f z] [@ (F map) f zs])])]
+    #;[(F loop) x = ((F loop) x)]
+    #;[(F f) x y = y])))
