@@ -5,29 +5,33 @@
 ;; translates program into FOL formula
 (define-metafunction halo
   P : p -> φ
-  [(P [d ...]) (∧* [D d] ...)])
+  [(P [d ...]) (∧ [D d] ...)])
 
 ;; translates definition into FOL formula
 (define-metafunction halo
   D : d -> φ
   [(D [f x ... = u])
-   ([∀ (x ...) (U [f x ...] u)]
-    ∧ [∀ (x ...) ([f x ...] = (app* [ptr f] x ...))])])
+   (∧ [∀ (x ...) (U [f x ...] u)]
+      [∀ (x ...) (= [f x ...] (app* [ptr f] x ...))])])
 
 ;; translates RHS into FOL formula
 (define-metafunction halo
   U : s u -> φ
-  [(U s e) (s = [E e])]
+  [(U s e) (= s [E e])]
+  [(U (f x_1 ... x x_i ...) [case x (K y ... -> e′) ...])
+   (∧ (= (f x_1 ... bad x_i ...) bad)
+      (∀ (y ...) (= (f x_1 ... [K y ...] x_i ...) (E e′))) ...
+      (⇒ (∧ (≠ x bad) (diff x K) ...) (= (f x_1 ... x x_i ...) unr)))]
   [(U s [case e (K y ... -> e′) ...])
-   (∧* [(t = bad) . ⇒ . (s = bad)]
-       [∀ (y ...) ([t = (K y ...)] . ⇒ . [s = (E e′)])] ...
-       [(∧* [t . ≠ . bad] [diff t K] ...) . ⇒ . (s = unr)])
+   (∧ [⇒ (= t bad) (= s bad)]
+      [∀ (y ...) (⇒ [= t (K y ...)] [= s (E e′)])] ...
+      [⇒ (∧ [≠ t bad] [diff t K] ...) (= s unr)])
    (where t [E e])])
 
 (define-metafunction halo
   diff : t K -> φ
   [(diff t K)
-   (t . ≠ . (K [sel K i t] ...))
+   (≠ t (K [sel K i t] ...))
    (where (i ...) ,(range 0 (arity (term K))))])
 
 ;; translates expression into FOL term
@@ -43,11 +47,11 @@
 (define-metafunction halo
   C : e ∈ c -> φ
   [(C e ∈ [flat x e′])
-   (∨* [t = unr] [(/ t′ x t) = unr] [(/ t′ x t) = (True)])
+   (∨ [= t unr] [= (/ t′ x t) unr] [= (/ t′ x t) (True)])
    (where (t t′) ([E e] [E e′]))]
   [(C e ∈ ([x : c_1] -> c_2))
-   (∀ [x] ([C x ∈ c_1] . ⇒ . [C (e x) ∈ c_2]))]
-  [(C e ∈ [c_1 & c_2]) ([C e ∈ c_1] ∧ [C e ∈ c_2])]
+   (∀ [x] (⇒ [C x ∈ c_1] [C (e x) ∈ c_2]))]
+  [(C e ∈ [c_1 & c_2]) (∧ [C e ∈ c_1] [C e ∈ c_2])]
   [(C e ∈ CF) (cf [E e])])
 
 (define (Theory-T Ks)
@@ -60,29 +64,28 @@
                     [xKs (names 'x nK)]
                     [xJs (names 'y nJ)])
          (if (zero? (+ nK nJ))
-             (term ([,K] . ≠ . [,J]))
-             (term (∀ (,@ xKs ,@ xJs)
-                      ([,K ,@ xKs] . ≠ . [,J ,@ xJs]))))))
+             (term (≠ [,K] [,J]))
+             (term (∀ (,@ xKs ,@ xJs) (≠ [,K ,@ xKs] [,J ,@ xJs]))))))
      (match-lambda**
-      [(`[¬ (,K = ,J)] `[¬ (,J = ,K)]) #t]
-      [(`[∀ ,_ (¬ ([,K ,_ ...] = [,J ,_ ...]))]
-        `[∀ ,_ (¬ ([,J ,_ ...] = [,K ,_ ...]))]) #t]
+      [(`[¬ (= ,K ,J)] `[¬ (= ,J ,K)]) #t]
+      [(`[∀ ,_ (¬ (= [,K ,_ ...] [,J ,_ ...]))]
+        `[∀ ,_ (¬ (= [,J ,_ ...] [,K ,_ ...]))]) #t]
       [(_ _) #f])))
   
   ;; constructors and exceptional values are distinct
   (define AxDisjCBU
     (for*/list ([Ki Ks] [t (term (bad unr))])
       (match Ki
-        [(list K 0) (term ([,K] . ≠ . ,t))]
+        [(list K 0) (term (≠ [,K] ,t))]
         [(list K n) (let ([xs (names 'x n)])
-                      (term (∀ ,xs ([,K ,@ xs] . ≠ . ,t))))])))
+                      (term (∀ ,xs (≠ [,K ,@ xs] ,t))))])))
   
   ;; selector behavior
   (define AxInj
     (for*/list ([Ki Ks] [i (in-range 0 (second Ki))])
       (match-let* ([(list K n) Ki]
                    [xs (names 'x n)])
-        (term (∀ ,xs ((sel ,K ,i (,K ,@ xs)) = ,(list-ref xs i)))))))
+        (term (∀ ,xs (= (sel ,K ,i (,K ,@ xs)) ,(list-ref xs i)))))))
   
   ;; constructor crash-free ⇔ each field is crash free
   (define AxCfC
@@ -90,27 +93,41 @@
       (match Ki
         [(list K 0) (term (cf [,K]))]
         [(list K n) (let ([xs (names 'x n)])
-                      (term (∀ ,xs ([cf [,K ,@ xs]]
-                                    . ⇔ . [∧* ,@ (for/list ([x xs])
-                                                   (term (cf ,x)))]))))])))
+                      (term (∀ ,xs (⇔ [cf [,K ,@ xs]]
+                                      [∧ ,@ (for/list ([x xs])
+                                              (term (cf ,x)))]))))])))
   
-  (term (∧*
-         [∀ (x) ([app bad x] = bad)]
-         [∀ (x) ([app unr x] = unr)]
-         [bad . ≠ . unr]
+  (term (∧
+         [∀ (x) (= [app bad x] bad)]
+         [∀ (x) (= [app unr x] unr)]
+         [≠ bad unr]
          ,@ AxDisjC ,@ AxDisjCBU ,@ AxInj ,@ AxCfC
          (cf unr) (¬ (cf bad)))))
 
 ;; returns all axioms generated for program
 (define-metafunction halo
   axioms : p -> φ
-  [(axioms p) (,[Theory-T Ks] ∧ (P p))])
+  [(axioms p) (∧ ,[Theory-T Ks] (P p))])
 
 ;; generate assertions from program and contract claim
+;; the last contract claim is the one to prove,
+;; preceded by 0+ assumptions
+;; p is the program
 (define-metafunction halo
-  gen : p (e ∈ c) -> {any ...}
-  [(gen p [e ∈ c])
-   (any_decs ... any_p ... any_¬e∈c ... [check-sat])
+  gen : p (e ∈ c) ... (e ∈ c) -> {any ...}
+  [(gen p (e_i ∈ c_i) ... [(F x_f) ∈ c])
+   (any_decs ... any_p ... any_assume ... any_rec∈c ... any_¬e∈c ... (check-sat))
+   (where (d_1 ... ([F x_f] x ... = u) d_i ...) p)
+   (where p_1 (d_1 ... ([F x_f] x ... = (ann-rec u x_f)) d_i ...))
+   (where x_rec ,(prefx 'rec [term x_f]))
+   (where {any_decs ...} ,(decs [term p_1]))
+   (where {any_p ...} (z3 (axioms p_1)))
+   (where {any_assume ...} (@@ (z3 (C e_i ∈ c_i)) ...))
+   (where {any_rec∈c ...} (z3 (C [F x_rec] ∈ c)))
+   (where {any_¬e∈c ...} (z3 (¬ (C [F x_f] ∈ c))))]
+  [(gen p (e_i ∈ c_i) ... [e ∈ c])
+   (any_decs ... any_p ... any_assume ... any_¬e∈c ... [check-sat])
    (where {any_decs ...} ,(decs [term p]))
    (where {any_p ...} (z3 (axioms p)))
+   (where {any_assume ...} (@@ (z3 (C e_i ∈ c_i)) ...))
    (where {any_¬e∈c ...} (z3 (¬ (C e ∈ c))))])

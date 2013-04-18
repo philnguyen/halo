@@ -12,7 +12,9 @@
   
   ; FOL
   [(s t t′) x (f t ...) (K t ...) (sel K i t) (ptr f) (app t s) unr bad]
-  [(φ ψ) (cf t) (t = t) (φ ∧ φ) (φ ∨ φ) (¬ φ) (∀ (x ...) φ) (∃ (x ...) φ)]
+  [(φ ψ) (cf t) (= t t) (≠ t t)
+         (∧ φ ...) (∨ φ ...) (¬ φ) (⇒ φ φ) (⇔ φ φ)
+         (∀ (x ...) φ) (∃ (x ...) φ)]
   
   [f (F x_name)]
   [(K J) True False Succ Zero Cons Nil]
@@ -34,6 +36,18 @@
   [(/ unr x t) unr]
   [(/ bad x t) bad])
 
+;; explicitly rename recusrive call
+(define-metafunction halo
+  ann-rec : u x -> u
+  [(ann-rec (case e [K y ... -> e_K] ...) x)
+   (case [ann-rec e x] [K y ... -> (ann-rec e_K x)] ...)]
+  [(ann-rec x z) x]
+  [(ann-rec (F x) x) (F ,(prefx 'rec [term x]))]
+  [(ann-rec (F z) x) (F z)]
+  [(ann-rec (K e ...) x) (K [ann-rec e x] ...)]
+  [(ann-rec (e_1 e_2) x) ([ann-rec e_1 x] [ann-rec e_2 x])]
+  [(ann-rec BAD x) BAD])
+
 ;;;;; CONVENIENT MACROS
 
 ;; multiple-argument function contract
@@ -42,18 +56,6 @@
   [([x : c_x] . ->* . c_y) ([x : c_x] -> c_y)]
   [([x : c_x] [y : c_y] ... . ->* . c_z)
    ([x : c_x] -> ([y : c_y] ... . ->* . c_z))])
-
-;; big conjunction
-(define-metafunction halo
-  ∧* : φ φ ... -> φ
-  [(∧* φ) φ]
-  [(∧* φ ψ ...) (φ ∧ [∧* ψ ...])])
-
-;; big disjunction
-(define-metafunction halo
-  ∨* : φ φ ... -> φ
-  [(∨* φ) φ]
-  [(∨* φ ψ ...) (φ ∨ [∨* ψ ...])])
 
 ;; curry application
 (define-metafunction halo
@@ -64,21 +66,6 @@
   @ : e ... -> e
   [(@ e) e]
   [(@ e_1 e_2 e_3 ...) (@ [e_1 e_2] e_3 ...)])
-
-;; desugar implication
-(define-metafunction halo
-  ⇒ : φ φ -> φ
-  [(φ . ⇒ . ψ) ([¬ φ] ∨ ψ)])
-
-;; desugar equivalence
-(define-metafunction halo
-  ⇔ : φ φ -> φ
-  [(φ . ⇔ . ψ) ([φ . ⇒ . ψ] ∧ [ψ . ⇒ . φ])])
-
-;; desugar difference
-(define-metafunction halo
-  ≠ : t t -> φ
-  [(s . ≠ . t) (¬ [s = t])])
 
 ;; primitive constructors
 (define Ks
@@ -100,16 +87,14 @@
   `([declare-sort T]
     
     ; declare function constants
-    ,@ (for/list ([d p])
+    ,@ (for/fold ([acc empty]) ([d p])
          (match-let* ([`([F ,f] ,x ... = ,u) d]
-                      [const-f (prefx 'f f)])
-           (match (length x)
-             [0 `(declare-const ,const-f T)]
-             [n `(declare-fun ,const-f ,(make-list n 'T) T)])))
-    ; declare function pointers
-    ,@ (for/list ([d p])
-         (match-let ([`([F ,f] ,x ... = ,u) d])
-           `(declare-const ,(prefx 'ptr f) T)))
+                      [n (length x)])
+           (append (list `[declare-fun ,(prefx 'f f) ,(make-list n 'T) T]
+                         `[declare-fun ,(prefx 'rec f) ,(make-list n 'T) T]
+                         `[declare-const ,(prefx 'ptr f) T]
+                         `[declare-const ,(prefx 'ptr-rec f) T])
+                   acc)))
     ; declare constructors
     ,@ (for/list ([k Ks])
          (match k
@@ -132,25 +117,36 @@
 
 ;; generate z3 assertions from formula
 (define-metafunction halo
-  z3 : φ -> (any ...)
-  [(z3 (φ ∧ ψ))
-   (any_1 ... any_2 ...)
-   (where (any_1 ...) (z3 φ)) (where (any_2 ...) (z3 ψ))]
+  z3 : φ -> ((assert any) ...)
+  #;[(z3 (∀ (x ...) (⇔ φ (∧ ψ ...))))
+     (any_1 ... any_2 ...)
+     (where (any_1 ...) ((z3 (∀ (x ...) (⇒ φ ψ))) ...))
+     (where (any_2 ...) (z3 (∀ (x ...) (⇒ (∧ ψ ...) φ))))]
+  [(z3 (∀ (x ...) (∧ φ ...))) (@@ (z3 (∀ (x ...) φ)) ...)]
+  [(z3 (∧ φ ...)) (@@ (z3 φ) ...)]
   [(z3 φ) {(assert [z3-φ φ])}])
+
+(define-metafunction halo
+  @@ : {any ...} ... -> {any ...}
+  [(@@ {any ...} ...) {any ... ...}])
 
 ;; convert formula
 (define-metafunction halo
   z3-φ : φ -> any
   [(z3-φ (cf t)) (cf [z3-t t])]
-  [(z3-φ (t_1 = t_2)) (= [z3-t t_1] [z3-t t_2])]
-  [(z3-φ (((¬ φ) ∨ ψ) ∧ ((¬ ψ) ∨ φ))) (= [z3-φ φ] [z3-φ ψ])]
-  [(z3-φ (φ ∧ ψ)) (and [z3-φ φ] [z3-φ ψ])]
-  [(z3-φ ([¬ φ] ∨ ψ)) (=> [z3-φ φ] [z3-φ ψ])]
-  [(z3-φ (φ ∨ ψ)) (or [z3-φ φ] [z3-φ ψ])]
-  [(z3-φ (¬ (s = t))) (distinct [z3-t s] [z3-t t])]
+  [(z3-φ (= s t)) (= [z3-t s] [z3-t t])]
+  [(z3-φ (≠ s t)) (distinct [z3-t s] [z3-t t])]
+  [(z3-φ (∧ φ)) (z3-φ φ)]
+  [(z3-φ (∧ φ ...)) (and [z3-φ φ] ...)]
+  [(z3-φ (∨ φ)) (z3-φ φ)]
+  [(z3-φ (∨ φ ...)) (or [z3-φ φ] ...)]
   [(z3-φ (¬ φ)) (not [z3-φ φ])]
+  [(z3-φ (⇒ φ ψ)) (=> [z3-φ φ] [z3-φ ψ])]
+  [(z3-φ (⇔ φ ψ)) (= [z3-φ φ] [z3-φ ψ])]
+  [(z3-φ (∀ (x ...) (∀ (z ...) φ))) (z3-φ (∀ (x ... z ...) φ))]
   [(z3-φ (∀ () φ)) (z3-φ φ)]
   [(z3-φ (∀ (x ...) φ)) (forall ([x T] ...) [z3-φ φ])]
+  [(z3-φ (∃ (x ...) (∃ (z ...) φ))) (z3-φ (∃ (x ... z ...) φ))]
   [(z3-φ (∃ () φ)) [z3-φ φ]]
   [(z3-φ (∃ (x ...) φ)) (exists ([x T] ...) [z3-φ φ])])
 
@@ -174,23 +170,27 @@
 ;;;;; Example program
 (define p
   (term
-   (#;[(F not) x = (case x
-                     [True -> (False)]
-                     [False -> (True)])]
-    #;[(F even?) n = (case n
-                       [Zero -> (True)]
-                       [Succ m -> ([F not] ([F even?] m))])]
-    [(F cons?) x = (case x
-                     [Nil -> (False)]
-                     [Cons z zs -> (True)])]
-    #;[(F nil?) x = (case x
-                      [Nil -> (True)]
-                      [Cons z zs -> (False)])]
+   ([(F cons?) xs = (case xs
+                      [Nil -> (False)]
+                      [True -> (True)])]
+    
+    ;; higher order list functions
+    [(F foldr) f a xs = (case xs
+                          [Nil -> a]
+                          [Cons z zs -> (@ f z (@ [F foldr] f a zs))])]
+    [(F foldl) f a xs = (case xs
+                          [Nil -> a]
+                          [Cons z zs -> (@ [F foldl] f (@ f a z) zs)])]
+    [(F map) f xs = (@ [F foldr] ([F map-foldr-step] f) (Nil) xs)]
+    [(F map-foldr-step) f x ys = (Cons (f x) ys)]
+    [(F reverse) xs = (@ [F foldl] [F cons-eta] (Nil) xs)]
+    [(F cons-eta) x xs = (Cons x xs)]
+    
+    ;; partial functions
     [(F head) xs = (case xs
                      [Nil -> BAD]
                      [Cons z zs -> z])]
-    #;[(F map) f xs = (case xs
-                        [Nil -> (Nil)]
-                        [Cons z zs -> (Cons [f z] [@ (F map) f zs])])]
-    #;[(F loop) x = ((F loop) x)]
-    #;[(F f) x y = y])))
+    [(F tail) xs = (case xs
+                     [Nil -> BAD]
+                     [Cons z zs -> zs])]
+    [(F foldr1) f xs = (@ [F foldr] f ([F head] xs) ([F tail] xs))])))

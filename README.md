@@ -1,4 +1,6 @@
 halo
 ====
 
-FM seminar homework
+FM seminar project.
+
+results directory contains generated queries.
